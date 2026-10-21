@@ -1,0 +1,23 @@
+[Unit]
+Description=Awasebin authenticated resumable uploads
+After=cosshare-api.service nginx.service
+Requires=cosshare-api.service
+RequiresMountsFor=/srv/cosshare
+[Service]
+User=cosshare
+Group=cosshare
+ExecStart=/usr/local/bin/tusd -host 127.0.0.1 -port 8080 -base-path /uploads/ -upload-dir /srv/cosshare/uploads -behind-proxy -disable-download -disable-termination -max-size 214748364800 -hooks-http http://127.0.0.1:8081/tus-hook -hooks-enabled-events pre-create,post-receive,post-finish
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/cosshare/uploads
+MemoryMax=512M
+# tusd request logs include upload IDs; retain only sanitized application audit records.
+StandardOutput=null
+StandardError=null
+[Install]
+WantedBy=multi-user.target

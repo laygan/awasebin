@@ -1,0 +1,24 @@
+[Unit]
+Description=Awasebin private WebRTC seed
+After=network-online.target postgresql.service cosshare-tracker.service
+Requires=postgresql.service
+RequiresMountsFor=/srv/cosshare
+[Service]
+User=cosshare
+Group=cosshare
+WorkingDirectory=/opt/cosshare
+EnvironmentFile=/etc/cosshare/app.env
+ExecStart=/usr/bin/node /opt/cosshare/server/seeder.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/cosshare/torrents
+ReadOnlyPaths=/srv/cosshare/files
+MemoryMax=3G
+TasksMax=256
+[Install]
+WantedBy=multi-user.target

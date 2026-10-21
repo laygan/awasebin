@@ -1,0 +1,92 @@
+# Render only AWASEBIN_HOST and INTERNAL_SECRET with envsubst; keep nginx $variables intact.
+map $http_user_agent $blocked_bot {
+ default 0;
+ ~*(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|CCBot|Google-Extended|Bytespider|Amazonbot|PerplexityBot|Perplexity-User|cohere-ai|Diffbot|FacebookBot|meta-externalagent|AI2Bot|Applebot-Extended|scrapy|wget|python-requests) 1;
+}
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+limit_req_zone $binary_remote_addr zone=control:10m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=connections:10m;
+# No URI, query, Referer, Cookie, IP or User-Agent in access records.
+log_format cosshare '$time_iso8601 $request_method $status $body_bytes_sent $request_time';
+server {
+ listen 80; listen [::]:80;
+ server_name ${AWASEBIN_HOST};
+ access_log off;
+ return 308 https://${AWASEBIN_HOST}$request_uri;
+}
+server {
+ listen 443 ssl; listen [::]:443 ssl;
+ server_name ${AWASEBIN_HOST};
+ ssl_certificate /etc/letsencrypt/live/${AWASEBIN_HOST}/fullchain.pem;
+ ssl_certificate_key /etc/letsencrypt/live/${AWASEBIN_HOST}/privkey.pem;
+ ssl_protocols TLSv1.2 TLSv1.3;
+ root /opt/cosshare/dist;
+ access_log /var/log/cosshare/access.log cosshare;
+ # nginx error messages can contain request URIs; do not persist those token-bearing lines.
+ error_log /dev/null crit;
+ autoindex off;
+ client_max_body_size 17m;
+ add_header X-Robots-Tag 'noindex, nofollow, noarchive, noimageindex' always;
+ add_header Referrer-Policy no-referrer always;
+ add_header X-Content-Type-Options nosniff always;
+ add_header X-Frame-Options DENY always;
+ add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self' wss://${AWASEBIN_HOST}; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+ if ($blocked_bot) { return 403; }
+ location ^~ /api/internal/ { return 404; }
+ location /health/ { allow 127.0.0.1; allow ::1; deny all; proxy_pass http://127.0.0.1:3000; }
+ location /api/ {
+  limit_req zone=control burst=60 nodelay;
+  limit_conn connections 20;
+  proxy_pass http://127.0.0.1:3000;
+  proxy_buffering off;
+  proxy_read_timeout 3600s;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-For '';
+ }
+ location /uploads/ {
+  auth_request /_upload_authorization;
+  proxy_pass http://127.0.0.1:8080;
+  proxy_request_buffering off;
+  proxy_buffering off;
+  proxy_http_version 1.1;
+  proxy_read_timeout 3600s;
+  proxy_send_timeout 3600s;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto https;
+  proxy_set_header X-Forwarded-For '';
+ }
+ location = /_upload_authorization {
+  internal;
+  proxy_pass http://127.0.0.1:3000/api/internal/tus-authorize;
+  proxy_method GET;
+  proxy_pass_request_body off;
+  proxy_set_header Content-Length '';
+  proxy_set_header X-Internal-Secret '${INTERNAL_SECRET}';
+  proxy_set_header X-Original-URI $request_uri;
+  proxy_set_header X-Original-Method $request_method;
+  proxy_set_header Upload-Token $http_upload_token;
+ }
+ location = /tracker {
+  limit_req zone=control burst=20 nodelay;
+  limit_conn connections 12;
+  proxy_pass http://127.0.0.1:3002;
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection $connection_upgrade;
+  proxy_set_header Host $host;
+  proxy_read_timeout 360s;
+ }
+ location / { try_files $uri $uri/ /index.html; }
+}
+# Loopback-only bridge injects the hook secret; tusd never sees public API routes.
+server {
+ listen 127.0.0.1:8081;
+ access_log off; error_log /dev/null crit;
+ client_max_body_size 128k;
+ location = /tus-hook {
+  proxy_pass http://127.0.0.1:3000/api/internal/tus-hook;
+  proxy_set_header X-Internal-Secret '${INTERNAL_SECRET}';
+ }
+ location / { return 404; }
+}

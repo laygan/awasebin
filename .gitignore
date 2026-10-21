@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+data/
+coverage/
+*.log
+*.tsbuildinfo
+public/vendor/

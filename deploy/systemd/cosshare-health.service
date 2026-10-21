@@ -1,0 +1,12 @@
+[Unit]
+Description=Awasebin readiness monitoring
+After=cosshare-api.service
+[Service]
+Type=oneshot
+User=cosshare
+WorkingDirectory=/opt/cosshare
+ExecStart=/usr/bin/node /opt/cosshare/scripts/health.mjs
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

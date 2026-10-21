@@ -1,0 +1,44 @@
+// Integration tests use an actual PostgreSQL engine compiled to WASM, not mocked SQL.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {PGlite} from '@electric-sql/pglite';
+import {randomUUID} from 'node:crypto';
+import {mkdtemp,rm,writeFile,mkdir} from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {migrate} from '../server/db.mjs';
+import {createApp} from '../server/app.mjs';
+import {config} from '../server/config.mjs';
+import {token,hash} from '../server/security.mjs';
+test('anonymous ACL, invitation gate, owner isolation, CSRF and range delivery',async t=>{
+ const pg=new PGlite(),root=await mkdtemp(path.join(os.tmpdir(),'awasebin-'));
+ const db={query:(s,p)=>pg.query(s,p),transaction:fn=>pg.transaction(fn)};
+ // PGlite's query() is single-statement; migration is an SQL script.
+ const fs=await import('node:fs/promises');await pg.exec(await fs.readFile(new URL('../server/schema.sql',import.meta.url),'utf8'));
+ const c=config({TOKEN_SECRET:'a'.repeat(64),INTERNAL_SECRET:'b'.repeat(64),DATA_ROOT:root,ORIGIN:'http://localhost:5173',RP_ID:'localhost'});
+ const app=await createApp(db,c);await app.ready();
+ t.after(async()=>{await app.close();await pg.close();await rm(root,{recursive:true,force:true});});
+ const post=(url,payload,headers={})=>app.inject({method:'POST',url,payload,headers:{origin:c.origin,...headers}});
+ assert.equal((await post('/api/auth/register/options',{token:token()})).statusCode,403);
+ assert.equal((await post('/api/auth/password',{})).statusCode,404);
+ assert.equal((await app.inject('/api/albums')).statusCode,401);
+ assert.equal((await app.inject(`/api/s/${token()}`)).statusCode,404);
+ assert.equal((await app.inject({url:'/health/live',headers:{'user-agent':'GPTBot'}})).statusCode,403);
+ const owner=randomUUID(),other=randomUUID(),album=randomUUID(),file=randomUUID(),share=token(),session=token(),csrf=token();
+ await db.query("INSERT INTO users(id,display_name,role) VALUES($1,'owner','uploader'),($2,'other','uploader')",[owner,other]);
+ await db.query("INSERT INTO sessions(id,user_id,csrf_hash,expires_at) VALUES($1,$2,$3,now()+interval '1 hour')",[hash(session),other,hash(csrf)]);
+ await db.query("INSERT INTO albums(id,owner_id,title,status,total_bytes,expires_at) VALUES($1,$2,'test','published',10,now()+interval '1 day')",[album,owner]);
+ await db.query("INSERT INTO files(id,album_id,original_name,stored_name,size_bytes,sha256,expected_sha256,mime_type,state) VALUES($1,$2,'photo.jpg',$4,10,$3,$3,'application/octet-stream','complete')",[file,album,hash('0123456789'),file]);
+ await db.query("INSERT INTO share_links(id,album_id,token_hash,expires_at) VALUES($1,$2,$3,now()+interval '1 day')",[randomUUID(),album,hash(share)]);
+ await mkdir(path.join(root,'files',album),{recursive:true});await writeFile(path.join(root,'files',album,file),'0123456789');
+ const cookie=`session=${session}; csrf=${csrf}`;
+ assert.equal((await app.inject({url:`/api/albums/${album}`,headers:{cookie}})).statusCode,404);
+ assert.equal((await post(`/api/albums/${album}/revoke`,{},{cookie})).statusCode,403);
+ assert.equal((await post(`/api/albums/${album}/revoke`,{},{cookie,'x-csrf-token':csrf})).statusCode,404);
+ const publicPage=await app.inject(`/api/s/${share}`);assert.equal(publicPage.statusCode,200);assert.equal(publicPage.json().files.length,1);assert.ok(!publicPage.body.includes('stored_name'));
+ const range=await app.inject({url:`/api/s/${share}/files/${file}`,headers:{range:'bytes=3-6'}});assert.equal(range.statusCode,206);assert.equal(range.body,'3456');assert.equal(range.headers['content-range'],'bytes 3-6/10');
+ assert.equal((await app.inject({url:`/api/s/${share}/files/${file}`,headers:{range:'bytes=99-'}})).statusCode,416);
+ await db.query("UPDATE albums SET status='revoked' WHERE id=$1",[album]);
+ for(const url of [`/api/s/${share}`,`/api/s/${share}/files/${file}`,`/api/s/${share}/previews/${file}`])assert.equal((await app.inject(url)).statusCode,404);
+ assert.equal((await post(`/api/s/${share}/peer-session`,{})).statusCode,503);
+});

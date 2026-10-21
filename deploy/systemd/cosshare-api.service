@@ -1,0 +1,25 @@
+[Unit]
+Description=Awasebin API and upload verifier
+After=network-online.target postgresql.service
+Requires=postgresql.service
+RequiresMountsFor=/srv/cosshare
+[Service]
+Type=simple
+User=cosshare
+Group=cosshare
+WorkingDirectory=/opt/cosshare
+EnvironmentFile=/etc/cosshare/app.env
+ExecStart=/usr/bin/node /opt/cosshare/server/main.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=600
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/srv/cosshare
+MemoryMax=2G
+TasksMax=128
+[Install]
+WantedBy=multi-user.target

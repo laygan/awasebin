@@ -1,0 +1,40 @@
+# Optional localhost upload gateway, inside nginx's http context.
+# Set INTERNAL_SECRET from your .env and render only that variable.
+server {
+ listen 127.0.0.1:8082;
+ access_log off;
+ error_log /dev/null crit;
+ client_max_body_size 17m;
+ location /uploads/ {
+  auth_request /_upload_authorization;
+  proxy_pass http://127.0.0.1:8080;
+  proxy_request_buffering off;
+  proxy_buffering off;
+  proxy_http_version 1.1;
+  proxy_set_header X-Forwarded-Host localhost:5173;
+  proxy_set_header X-Forwarded-Proto http;
+  proxy_read_timeout 3600s;
+ }
+ location = /_upload_authorization {
+  internal;
+  proxy_pass http://127.0.0.1:3000/api/internal/tus-authorize;
+  proxy_method GET;
+  proxy_pass_request_body off;
+  proxy_set_header Content-Length '';
+  proxy_set_header X-Internal-Secret '${INTERNAL_SECRET}';
+  proxy_set_header X-Original-URI $request_uri;
+  proxy_set_header X-Original-Method $request_method;
+  proxy_set_header Upload-Token $http_upload_token;
+ }
+ location / { return 404; }
+}
+server {
+ listen 127.0.0.1:8081;
+ access_log off;
+ error_log /dev/null crit;
+ location = /tus-hook {
+  proxy_pass http://127.0.0.1:3000/api/internal/tus-hook;
+  proxy_set_header X-Internal-Secret '${INTERNAL_SECRET}';
+ }
+ location / { return 404; }
+}

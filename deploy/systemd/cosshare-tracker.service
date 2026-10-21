@@ -1,0 +1,19 @@
+[Unit]
+Description=Awasebin authorized WebTorrent signaling
+After=network-online.target postgresql.service
+Requires=postgresql.service
+[Service]
+User=cosshare
+Group=cosshare
+WorkingDirectory=/opt/cosshare
+EnvironmentFile=/etc/cosshare/app.env
+ExecStart=/usr/bin/node /opt/cosshare/server/tracker.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=512M
+[Install]
+WantedBy=multi-user.target

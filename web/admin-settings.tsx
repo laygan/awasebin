@@ -1,0 +1,9 @@
+import {useEffect,useState} from 'react';
+type Props={api:(path:string,body?:unknown)=>Promise<any>;run:(fn:()=>Promise<void>)=>Promise<void>;notify:(s:string)=>void};
+export function AdminSettings({api,run,notify}:Props){
+ const [settings,setSettings]=useState<Record<string,number|boolean>|null>(null),[allowed,setAllowed]=useState(false),[metrics,setMetrics]=useState<any>(null);
+ useEffect(()=>{void run(async()=>{const [s,m]=await Promise.all([api('/admin/settings'),api('/admin/metrics')]);setSettings(s.settings);setAllowed(s.p2pAllowed);setMetrics(m);});},[]);
+ if(!settings)return null;
+ const fields:[string,string,number][]=[['maxAlbum','1セット上限（GB）',1024**3],['budget','保存容量予算（GB）',1024**3],['maxUploads','同時アップロード数',1],['maxPeers','同時P2P接続数',1],['retention','保持期間上限（日）',1],['sessionSeconds','セッション有効期間（分）',60]];
+ return <><form className="panel" onSubmit={e=>{e.preventDefault();void run(async()=>{await api('/admin/settings',settings);notify('システム設定を保存しました。各サービスに順次反映されます。');});}}><h2>システム設定</h2><div className="settings-grid">{fields.map(([key,label,factor])=><label key={key}>{label}<input required type="number" min={key==='sessionSeconds'?5:1} step="1" value={Number(settings[key])/factor} onChange={e=>setSettings({...settings,[key]:Number(e.target.value)*factor})}/></label>)}</div><label className="settings-check"><input type="checkbox" disabled={!allowed} checked={!!settings.p2p} onChange={e=>setSettings({...settings,p2p:e.target.checked})}/>P2P配信を有効にする</label><p className="fine">P2PはVM側の受入設定で許可された場合のみ有効にできます。ファイル上限の変更時はtusdの上限も合わせてください。</p><button className="primary">設定を保存</button></form>{metrics&&<div className="panel"><h2>直近24時間の転送</h2>{metrics.transfers.length?metrics.transfers.map((m:any)=><p key={m.pathway}>{m.pathway.toUpperCase()} · {m.transfers}リクエスト · {(Number(m.bytes)/1024**3).toFixed(2)} GB</p>):<p>転送記録はまだありません。</p>}<small>HTTPはリクエストごと、P2Pは接続終了ごとに記録します。TURNは無効です。</small></div>}</>;
+}

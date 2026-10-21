@@ -1,0 +1,7 @@
+[Unit]
+Description=Back up Awasebin metadata every day
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+[Install]
+WantedBy=timers.target
